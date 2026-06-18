@@ -488,3 +488,60 @@ async def find_videos(
         results=candidates,
         notes=notes,
     )
+    
+@app.get("/find-videos-simple")
+async def find_videos_simple(
+    celebrity: str = Query(..., min_length=2, description="Full celebrity name, e.g. Ryan Reynolds."),
+    limit: int = Query(5, ge=1, le=20, description="Number of ranked results to return."),
+    avoid_shorts: bool = Query(True, description="Filter out YouTube Shorts and very short videos."),
+    max_candidates: int = Query(40, ge=25, le=80, description="How many candidate videos to scan before ranking."),
+    include_comments: bool = Query(False, description="Whether to scan comments for timestamp clues."),
+    region_code: str = Query(DEFAULT_REGION_CODE, min_length=2, max_length=2, description="YouTube region code, e.g. US, GB."),
+    published_after: Optional[str] = Query(None, description="Optional RFC3339 date filter, e.g. 2020-01-01T00:00:00Z."),
+    x_movazzi_key: Optional[str] = Header(None, alias="X-Movazzi-Key"),
+) -> Dict[str, Any]:
+    full_response = await find_videos(
+        celebrity=celebrity,
+        limit=limit,
+        avoid_shorts=avoid_shorts,
+        max_candidates=max_candidates,
+        include_comments=include_comments,
+        region_code=region_code,
+        published_after=published_after,
+        x_movazzi_key=x_movazzi_key,
+    )
+
+    simple_results = []
+
+    for video in full_response.results:
+        moments = []
+        for moment in video.key_moments[:5]:
+            moments.append({
+                "timestamp": moment.timestamp,
+                "mentions": moment.mentions,
+            })
+
+        simple_results.append({
+            "rank": video.rank,
+            "title": video.title,
+            "url": video.url,
+            "channel": video.channel_title,
+            "duration": video.duration,
+            "views": video.view_count,
+            "likely_original_source": video.likely_original_source,
+            "likely_compilation_or_reupload": video.likely_compilation_or_reupload,
+            "key_moments": moments,
+            "why_good": video.why_good_for_movazzi[:3],
+            "caution": video.caution[:3],
+        })
+
+    return {
+        "celebrity": full_response.celebrity,
+        "results_returned": full_response.results_returned,
+        "results": simple_results,
+        "notes": [
+            "Research candidates only.",
+            "Verify original source, context, and reuse rights before using clips.",
+            "Shorts are filtered by duration and Shorts signals, but verify manually."
+        ],
+    }
