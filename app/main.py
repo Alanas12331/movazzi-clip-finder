@@ -148,29 +148,22 @@ def normalize_text(s: str) -> str:
 
 def video_mentions_celebrity(video: Dict[str, Any], celebrity: str) -> bool:
     snippet = video.get("snippet", {})
-    title = snippet.get("title", "")
-    description = snippet.get("description", "")
-    tags = snippet.get("tags", [])
-
-    searchable_text = normalize_text(
-        f"{title} {description} {' '.join(tags) if isinstance(tags, list) else ''}"
-    )
+    title = normalize_text(snippet.get("title", ""))
 
     celebrity_norm = normalize_text(celebrity)
     tokens = re.findall(r"[a-z0-9]+", celebrity_norm)
+
     stopwords = {"the", "a", "an", "and", "of", "jr", "sr"}
     tokens = [t for t in tokens if t not in stopwords and len(t) > 1]
 
     if not tokens:
         return True
 
-    if celebrity_norm in searchable_text:
-        return True
+    title_tokens = re.findall(r"[a-z0-9]+", title)
 
-    if len(tokens) == 1:
-        return tokens[0] in searchable_text
-
-    return all(token in searchable_text for token in tokens)
+    # Strict rule: every meaningful part of the celebrity name must be in the title.
+    # Example: "Ryan Reynolds" requires both "ryan" and "reynolds" in the title.
+    return all(token in title_tokens for token in tokens)
 
 
 def is_short_or_bad(video: Dict[str, Any], avoid_shorts: bool) -> Optional[str]:
