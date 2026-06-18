@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: movazzi-clip-finder
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: YOUTUBE_API_KEY
+        sync: false
+      - key: MOVAZZI_ACTION_KEY
+        sync: false
+      - key: MIN_DURATION_SECONDS
+        value: "120"
+      - key: COMMENT_SAMPLE_PER_VIDEO
+        value: "40"
+      - key: DEFAULT_REGION_CODE
+        value: "US"

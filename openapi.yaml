@@ -1,0 +1,160 @@
+openapi: 3.1.0
+info:
+  title: Movazzi Clip Finder API
+  version: "1.0.0"
+  description: Finds non-Short YouTube source videos and likely key moments for funny celebrity video research.
+servers:
+  - url: https://YOUR-DEPLOYED-BACKEND-URL.com
+    description: Replace this with your deployed HTTPS backend URL.
+paths:
+  /find-videos:
+    get:
+      operationId: findCelebrityVideos
+      summary: Find ranked non-Short YouTube source videos for a celebrity.
+      description: Searches YouTube for original/full-length celebrity interview/red-carpet/talk-show videos, filters out Shorts, ranks videos, and returns likely key moments from viewer timestamp comments.
+      security:
+        - MovazziActionKey: []
+      parameters:
+        - name: celebrity
+          in: query
+          required: true
+          description: Full celebrity name, for example "Ryan Reynolds".
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          description: Number of results to return. Maximum 50.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 50
+        - name: avoid_shorts
+          in: query
+          required: false
+          description: Whether to filter YouTube Shorts and very short videos.
+          schema:
+            type: boolean
+            default: true
+        - name: max_candidates
+          in: query
+          required: false
+          description: Number of candidate videos to scan before ranking.
+          schema:
+            type: integer
+            minimum: 25
+            maximum: 300
+            default: 160
+        - name: include_comments
+          in: query
+          required: false
+          description: Whether to scan comments for likely timestamp moments.
+          schema:
+            type: boolean
+            default: true
+        - name: region_code
+          in: query
+          required: false
+          description: Two-letter YouTube region code such as US or GB.
+          schema:
+            type: string
+            default: US
+        - name: published_after
+          in: query
+          required: false
+          description: Optional RFC3339 filter, for example 2020-01-01T00:00:00Z.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Ranked video research candidates.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  celebrity:
+                    type: string
+                  limit:
+                    type: integer
+                  searched_queries:
+                    type: array
+                    items:
+                      type: string
+                  total_candidates_scanned:
+                    type: integer
+                  results_returned:
+                    type: integer
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        rank:
+                          type: integer
+                        score:
+                          type: number
+                        title:
+                          type: string
+                        url:
+                          type: string
+                        video_id:
+                          type: string
+                        channel_title:
+                          type: string
+                        published_at:
+                          type: string
+                        duration:
+                          type: string
+                        duration_seconds:
+                          type: integer
+                        view_count:
+                          type: integer
+                        like_count:
+                          type:
+                            - integer
+                            - "null"
+                        comment_count:
+                          type: integer
+                        likely_original_source:
+                          type: boolean
+                        likely_compilation_or_reupload:
+                          type: boolean
+                        key_moments:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              timestamp:
+                                type: string
+                              seconds:
+                                type: integer
+                              mentions:
+                                type: integer
+                              sample_comments:
+                                type: array
+                                items:
+                                  type: string
+                        why_good_for_movazzi:
+                          type: array
+                          items:
+                            type: string
+                        caution:
+                          type: array
+                          items:
+                            type: string
+                  notes:
+                    type: array
+                    items:
+                      type: string
+        "401":
+          description: Invalid or missing action key.
+        "500":
+          description: Server configuration error.
+components:
+  securitySchemes:
+    MovazziActionKey:
+      type: apiKey
+      in: header
+      name: X-Movazzi-Key
