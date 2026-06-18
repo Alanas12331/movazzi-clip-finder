@@ -380,7 +380,8 @@ def summarize_moments(comments: List[str], duration_seconds: int) -> List[Moment
         ts_list = extract_timestamps_from_comment(comment)
         signal = funny_signal_count(comment)
         for sec in ts_list:
-            if sec <= 0:
+            # Skip 0:00 / intro timestamps.
+            if sec < 10:
                 continue
             # Ignore timestamps beyond video duration when duration is known.
             if duration_seconds and sec > duration_seconds + 15:
@@ -452,12 +453,20 @@ async def find_videos(
             continue
 
         duration_seconds = parse_duration_seconds(content.get("duration", ""))
-        comments_text = []
-        moments: List[Moment] = []
 
+        moment_sources = []
+
+        # Scan video description/chapters for timestamps.
+        description = snippet.get("description", "")
+        if description:
+            moment_sources.append(description)
+
+        # Optionally scan comments for viewer-mentioned timestamps.
         if include_comments and int(stats.get("commentCount", 0) or 0) > 0:
             comments_text = await fetch_comments(video.get("id"), COMMENT_SAMPLE_PER_VIDEO)
-            moments = summarize_moments(comments_text, duration_seconds)
+            moment_sources.extend(comments_text)
+
+        moments: List[Moment] = summarize_moments(moment_sources, duration_seconds)
 
         score, why, caution = score_video(video, moments, celebrity)
 
