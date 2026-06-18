@@ -440,7 +440,7 @@ async def find_videos(
             continue
 
         if not video_mentions_celebrity(video, celebrity):
-        continue
+            continue
 
         snippet = video.get("snippet", {})
         stats = video.get("statistics", {})
