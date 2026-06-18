@@ -146,6 +146,32 @@ def build_queries(celebrity: str) -> List[str]:
 def normalize_text(s: str) -> str:
     return (s or "").lower().strip()
 
+def video_mentions_celebrity(video: Dict[str, Any], celebrity: str) -> bool:
+    snippet = video.get("snippet", {})
+    title = snippet.get("title", "")
+    description = snippet.get("description", "")
+    tags = snippet.get("tags", [])
+
+    searchable_text = normalize_text(
+        f"{title} {description} {' '.join(tags) if isinstance(tags, list) else ''}"
+    )
+
+    celebrity_norm = normalize_text(celebrity)
+    tokens = re.findall(r"[a-z0-9]+", celebrity_norm)
+    stopwords = {"the", "a", "an", "and", "of", "jr", "sr"}
+    tokens = [t for t in tokens if t not in stopwords and len(t) > 1]
+
+    if not tokens:
+        return True
+
+    if celebrity_norm in searchable_text:
+        return True
+
+    if len(tokens) == 1:
+        return tokens[0] in searchable_text
+
+    return all(token in searchable_text for token in tokens)
+
 
 def is_short_or_bad(video: Dict[str, Any], avoid_shorts: bool) -> Optional[str]:
     snippet = video.get("snippet", {})
@@ -419,6 +445,9 @@ async def find_videos(
         bad_reason = is_short_or_bad(video, avoid_shorts=avoid_shorts)
         if bad_reason:
             continue
+
+        if not video_mentions_celebrity(video, celebrity):
+        continue
 
         snippet = video.get("snippet", {})
         stats = video.get("statistics", {})
