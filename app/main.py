@@ -592,7 +592,7 @@ async def find_videos(
         # Skip videos that are not embeddable/public where possible.
         if status.get("privacyStatus") not in (None, "public"):
             continue
-
+            
         duration_seconds = parse_duration_seconds(content.get("duration", ""))
 
         comments_text = []
@@ -600,12 +600,12 @@ async def find_videos(
         # Only scan YouTube comments for timestamp moments and viewer clue comments.
         if include_comments and int(stats.get("commentCount", 0) or 0) > 0:
             comments_text = await fetch_comments(video.get("id"), COMMENT_SAMPLE_PER_VIDEO)
-            
-       moments: List[Moment] = summarize_moments(
-           comments_text,
-           duration_seconds,
-           max_moments=MAX_TIMESTAMP_MOMENTS_PER_VIDEO,
-       )
+
+        moments: List[Moment] = summarize_moments(
+            comments_text,
+            duration_seconds,
+            max_moments=MAX_TIMESTAMP_MOMENTS_PER_VIDEO,
+        )
 
         viewer_clue_comments: List[ViewerCommentClue] = extract_viewer_clue_comments(
             comments_text,
