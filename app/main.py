@@ -418,8 +418,9 @@ async def find_videos(
     limit: int = Query(50, ge=1, le=50, description="Number of ranked results to return."),
     avoid_shorts: bool = Query(True, description="Filter out YouTube Shorts and very short videos."),
     max_candidates: int = Query(160, ge=25, le=300, description="How many candidate videos to scan before ranking."),
-    include_comments: bool = Query(True, description="Whether to scan comments for timestamp clues."),
-    region_code: str = Query(DEFAULT_REGION_CODE, min_length=2, max_length=2, description="YouTube region code, e.g. US, GB."),
+    include_comments: bool = Query(True, description="Whether to scan comments for timestamp clues and viewer clue comments."),
+    comment_scan_top_n: int = Query(10, ge=0, le=40, description="Only scan comments for the top N ranked videos to save YouTube API quota."),
+    region_code: str = Query(DEFAULT_REGION_CODE, description="Optional YouTube region code, e.g. US, GB. Leave blank for no region restriction."),
     published_after: Optional[str] = Query(None, description="Optional RFC3339 date filter, e.g. 2020-01-01T00:00:00Z."),
     x_movazzi_key: Optional[str] = Header(None, alias="X-Movazzi-Key"),
 ) -> FindVideosResponse:
@@ -454,19 +455,11 @@ async def find_videos(
 
         duration_seconds = parse_duration_seconds(content.get("duration", ""))
 
-        moment_sources = []
-
-        # Scan video description/chapters for timestamps.
-        description = snippet.get("description", "")
-        if description:
-            moment_sources.append(description)
-
-        # Optionally scan comments for viewer-mentioned timestamps.
-        if include_comments and int(stats.get("commentCount", 0) or 0) > 0:
-            comments_text = await fetch_comments(video.get("id"), COMMENT_SAMPLE_PER_VIDEO)
-            moment_sources.extend(comments_text)
-
-        moments: List[Moment] = summarize_moments(moment_sources, duration_seconds)
+        # Do not scan comments or descriptions here.
+        # First rank videos cheaply by metadata.
+        # Comments are scanned later only for the top selected results.
+        moments: List[Moment] = []
+        viewer_clue_comments: List[ViewerCommentClue] = []
 
         score, why, caution = score_video(video, moments, celebrity)
 
@@ -493,12 +486,59 @@ async def find_videos(
             likely_original_source=detect_original_source(video),
             likely_compilation_or_reupload=detect_compilation(video),
             key_moments=moments,
+            viewer_clue_comments=viewer_clue_comments,
             why_good_for_movazzi=why,
             caution=caution,
         ))
 
     candidates.sort(key=lambda x: x.score, reverse=True)
     candidates = candidates[:limit]
+
+    # Scan comments only after ranking, and only for the top N selected videos.
+    # This saves YouTube API quota compared with scanning comments for every candidate.
+    if include_comments and comment_scan_top_n > 0:
+        for candidate in candidates[:comment_scan_top_n]:
+            comments_text = []
+
+            if candidate.comment_count > 0:
+                comments_text = await fetch_comments(candidate.video_id, COMMENT_SAMPLE_PER_VIDEO)
+
+            moments: List[Moment] = summarize_moments(
+                comments_text,
+                candidate.duration_seconds,
+                max_moments=MAX_TIMESTAMP_MOMENTS_PER_VIDEO,
+            )
+
+            viewer_clue_comments: List[ViewerCommentClue] = extract_viewer_clue_comments(
+                comments_text,
+                max_items=MAX_VIEWER_CLUES_PER_VIDEO,
+            )
+
+            candidate.key_moments = moments
+            candidate.viewer_clue_comments = viewer_clue_comments
+
+            candidate.caution = [
+                c for c in candidate.caution
+                if "No strong timestamp moments found" not in c
+            ]
+
+            if moments:
+                candidate.why_good_for_movazzi.append(
+                    f"Found {len(moments)} comment timestamp moment(s)."
+                )
+            else:
+                candidate.caution.append("No strong timestamp moments found in scanned comments.")
+
+            if viewer_clue_comments:
+                candidate.why_good_for_movazzi.append(
+                    f"Found {len(viewer_clue_comments)} viewer clue comment(s)."
+                )
+
+    if include_comments and comment_scan_top_n < len(candidates):
+        for candidate in candidates[comment_scan_top_n:]:
+            candidate.caution.append(
+                "Comments were not scanned for this result to save YouTube API quota."
+            )
 
     for i, candidate in enumerate(candidates, start=1):
         candidate.rank = i
@@ -523,11 +563,12 @@ async def find_videos(
 @app.get("/find-videos-simple")
 async def find_videos_simple(
     celebrity: str = Query(..., min_length=2, description="Full celebrity name, e.g. Ryan Reynolds."),
-    limit: int = Query(5, ge=1, le=20, description="Number of ranked results to return."),
+    limit: int = Query(10, ge=1, le=40, description="Number of ranked results to return."),
     avoid_shorts: bool = Query(True, description="Filter out YouTube Shorts and very short videos."),
-    max_candidates: int = Query(40, ge=25, le=80, description="How many candidate videos to scan before ranking."),
-    include_comments: bool = Query(False, description="Whether to scan comments for timestamp clues."),
-    region_code: str = Query(DEFAULT_REGION_CODE, min_length=2, max_length=2, description="YouTube region code, e.g. US, GB."),
+    max_candidates: int = Query(40, ge=25, le=250, description="How many candidate videos to scan before ranking."),
+    include_comments: bool = Query(True, description="Whether to scan comments for timestamp clues and viewer clue comments."),
+    comment_scan_top_n: int = Query(10, ge=0, le=40, description="Only scan comments for the top N ranked videos to save YouTube API quota."),
+    region_code: str = Query(DEFAULT_REGION_CODE, description="Optional YouTube region code, e.g. US, GB. Leave blank for no region restriction."),
     published_after: Optional[str] = Query(None, description="Optional RFC3339 date filter, e.g. 2020-01-01T00:00:00Z."),
     x_movazzi_key: Optional[str] = Header(None, alias="X-Movazzi-Key"),
 ) -> Dict[str, Any]:
@@ -537,6 +578,7 @@ async def find_videos_simple(
         avoid_shorts=avoid_shorts,
         max_candidates=max_candidates,
         include_comments=include_comments,
+        comment_scan_top_n=comment_scan_top_n,
         region_code=region_code,
         published_after=published_after,
         x_movazzi_key=x_movazzi_key,
@@ -546,10 +588,19 @@ async def find_videos_simple(
 
     for video in full_response.results:
         moments = []
-        for moment in video.key_moments[:5]:
+        for moment in video.key_moments[:MAX_TIMESTAMP_MOMENTS_PER_VIDEO]:
             moments.append({
                 "timestamp": moment.timestamp,
-                "mentions": moment.mentions,
+                "score": moment.mentions,
+                "evidence": moment.sample_comments[0] if moment.sample_comments else "",
+            })
+
+        viewer_clues = []
+        for clue in video.viewer_clue_comments[:MAX_VIEWER_CLUES_PER_VIDEO]:
+            viewer_clues.append({
+                "score": clue.score,
+                "comment": clue.text,
+                "signals": clue.signals,
             })
 
         simple_results.append({
@@ -562,6 +613,7 @@ async def find_videos_simple(
             "likely_original_source": video.likely_original_source,
             "likely_compilation_or_reupload": video.likely_compilation_or_reupload,
             "key_moments": moments,
+            "viewer_clue_comments": viewer_clues,
             "why_good": video.why_good_for_movazzi[:3],
             "caution": video.caution[:3],
         })
@@ -572,6 +624,9 @@ async def find_videos_simple(
         "results": simple_results,
         "notes": [
             "Research candidates only.",
+            "Timestamp moments come only from YouTube comments, not video descriptions.",
+            "Viewer clue comments are non-timestamp comments that may describe funny or memorable moments.",
+            "Comments are scanned only for the top selected results to save YouTube API quota.",
             "Verify original source, context, and reuse rights before using clips.",
             "Shorts are filtered by duration and Shorts signals, but verify manually."
         ],
