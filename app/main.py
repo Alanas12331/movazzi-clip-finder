@@ -219,6 +219,136 @@ def extract_timestamps_from_comment(text: str) -> List[int]:
 def funny_signal_count(text: str) -> int:
     t = normalize_text(text)
     return sum(1 for w in FUNNY_WORDS if w in t)
+    VIEWER_MOMENT_CLUE_PHRASES = {
+    "the way he", "the way she", "the way they",
+    "his face", "her face", "their face",
+    "his reaction", "her reaction", "their reaction",
+    "the look on", "when he", "when she", "when they",
+    "that part", "this part", "the part where",
+    "the moment", "that moment", "at the end",
+    "the ending", "the delivery", "his delivery", "her delivery",
+    "he said", "she said", "they said",
+    "he says", "she says", "they say",
+    "he asked", "she asked", "the answer",
+    "the comeback", "that comeback", "the roast",
+    "the joke", "that joke", "the laugh",
+    "can't stop laughing", "made me laugh", "had me laughing",
+    "i lost it", "i died", "i'm dead", "i cried laughing",
+    "this killed me", "had me dying", "had everyone laughing",    
+    " ", "that killed me", "the way",
+}
+
+
+def comment_has_timestamp(text: str) -> bool:
+    return bool(TIMESTAMP_RE.search(text or ""))
+
+
+def score_viewer_clue_comment(text: str) -> tuple[int, List[str]]:
+    """
+    Scores comments that likely describe funny moments but do not contain timestamps.
+    """
+    if not text:
+        return 0, []
+
+    # Keep viewer clue comments separate from timestamp comments.
+    if comment_has_timestamp(text):
+        return 0, []
+
+    cleaned = " ".join(text.split())
+    text_l = normalize_text(cleaned)
+
+    # Skip comments that are too short or too long to be useful.
+    if len(cleaned) < 20 or len(cleaned) > 700:
+        return 0, []
+
+    score = 0
+    signals = []
+
+    for word in FUNNY_WORDS:
+        if word in text_l:
+            score += 2
+            signals.append(word)
+
+    for phrase in VIEWER_MOMENT_CLUE_PHRASES:
+        if phrase in text_l:
+            score += 3
+            signals.append(phrase)
+
+    # Strong signal: comments with quoted text often repeat the exact funny line from the video.
+    quoted_phrases = re.findall(r'[“"]([^“"]{4,180})[”"]', cleaned)
+
+    if quoted_phrases:
+        score += 8
+        signals.append("quoted transcript line")
+
+        for quote in quoted_phrases[:3]:
+            quote_l = normalize_text(quote)
+            if any(word in quote_l for word in FUNNY_WORDS):
+                score += 2
+            if any(phrase in quote_l for phrase in ["i look up to", "what", "wait", "sorry", "no way", "come on"]):
+                score += 2
+
+    # Also catch apostrophe-style quotes, but with lower confidence because normal words use apostrophes too.
+    if "'" in cleaned and any(phrase in text_l for phrase in ["he said", "she said", "when he", "when she", "that line"]):
+        score += 3
+        signals.append("possible quoted line")
+
+    emoji_signals = ["😂", "🤣", "💀"]
+    for emoji in emoji_signals:
+        if emoji in cleaned:
+            score += 3
+            signals.append(emoji)
+
+    if "!" in cleaned:
+        score += 1
+        signals.append("exclamation")
+
+    if "?" in cleaned:
+        score += 1
+        signals.append("question/reaction")
+
+    generic_phrases = [
+        "great actor", "love him", "love her", "legend", "respect",
+        "one of the best", "my favorite actor", "amazing actor",
+    ]
+    if any(phrase in text_l for phrase in generic_phrases) and score < 6:
+        return 0, []
+
+    if score < 5:
+        return 0, []
+
+    unique_signals = []
+    for signal in signals:
+        if signal not in unique_signals:
+            unique_signals.append(signal)
+
+    return score, unique_signals[:10]
+
+
+def extract_viewer_clue_comments(comments: List[str], max_items: int = 30) -> List[ViewerCommentClue]:
+    scored_comments = []
+    seen = set()
+
+    for comment in comments:
+        cleaned = " ".join((comment or "").split())
+        key = normalize_text(cleaned)
+
+        if not key or key in seen:
+            continue
+
+        seen.add(key)
+
+        score, signals = score_viewer_clue_comment(cleaned)
+
+        if score > 0:
+            scored_comments.append(ViewerCommentClue(
+                score=score,
+                text=cleaned[:650],
+                signals=signals,
+            ))
+
+    scored_comments.sort(key=lambda item: item.score, reverse=True)
+    return scored_comments[:max_items]
 
 
 async def search_video_ids(
@@ -246,8 +376,11 @@ async def search_video_ids(
                 "order": order,
                 "safeSearch": "none",
                 "videoEmbeddable": "true",
-                "regionCode": region_code or DEFAULT_REGION_CODE,
             }
+
+            resolved_region_code = (region_code or DEFAULT_REGION_CODE or "").strip()
+            if resolved_region_code:
+                params["regionCode"] = resolved_region_code
             if published_after:
                 params["publishedAfter"] = published_after
 
@@ -380,7 +513,7 @@ def score_video(video: Dict[str, Any], key_moments: List[Moment], celebrity: str
     return round(score, 2), why, caution
 
 
-def summarize_moments(comments: List[str], duration_seconds: int) -> List[Moment]:
+def summarize_moments(comments: List[str], duration_seconds: int, max_moments: int = 30) -> List[Moment]:
     buckets: Dict[int, List[str]] = defaultdict(list)
     mention_counts = Counter()
 
@@ -404,7 +537,7 @@ def summarize_moments(comments: List[str], duration_seconds: int) -> List[Moment
                 buckets[bucket].append(comment[:220])
 
     moments = []
-    for sec, count in mention_counts.most_common(8):
+    for sec, count in mention_counts.most_common(max_moments):
         moments.append(Moment(
             timestamp=format_seconds(sec),
             seconds=sec,
@@ -427,7 +560,7 @@ async def find_videos(
     avoid_shorts: bool = Query(True, description="Filter out YouTube Shorts and very short videos."),
     max_candidates: int = Query(160, ge=25, le=300, description="How many candidate videos to scan before ranking."),
     include_comments: bool = Query(True, description="Whether to scan comments for timestamp clues."),
-    region_code: str = Query(DEFAULT_REGION_CODE, min_length=2, max_length=2, description="YouTube region code, e.g. US, GB."),
+    region_code: str = Query(DEFAULT_REGION_CODE, description="Optional YouTube region code, e.g. US, GB. Leave blank for no region restriction."),
     published_after: Optional[str] = Query(None, description="Optional RFC3339 date filter, e.g. 2020-01-01T00:00:00Z."),
     x_movazzi_key: Optional[str] = Header(None, alias="X-Movazzi-Key"),
 ) -> FindVideosResponse:
@@ -462,19 +595,22 @@ async def find_videos(
 
         duration_seconds = parse_duration_seconds(content.get("duration", ""))
 
-        moment_sources = []
+        comments_text = []
 
-        # Scan video description/chapters for timestamps.
-        description = snippet.get("description", "")
-        if description:
-            moment_sources.append(description)
-
-        # Optionally scan comments for viewer-mentioned timestamps.
+        # Only scan YouTube comments for timestamp moments and viewer clue comments.
         if include_comments and int(stats.get("commentCount", 0) or 0) > 0:
             comments_text = await fetch_comments(video.get("id"), COMMENT_SAMPLE_PER_VIDEO)
-            moment_sources.extend(comments_text)
+            
+       moments: List[Moment] = summarize_moments(
+           comments_text,
+           duration_seconds,
+           max_moments=MAX_TIMESTAMP_MOMENTS_PER_VIDEO,
+       )
 
-        moments: List[Moment] = summarize_moments(moment_sources, duration_seconds)
+        viewer_clue_comments: List[ViewerCommentClue] = extract_viewer_clue_comments(
+            comments_text,
+            max_items=MAX_VIEWER_CLUES_PER_VIDEO,
+        )
 
         score, why, caution = score_video(video, moments, celebrity)
 
@@ -501,6 +637,7 @@ async def find_videos(
             likely_original_source=detect_original_source(video),
             likely_compilation_or_reupload=detect_compilation(video),
             key_moments=moments,
+            viewer_clue_comments=viewer_clue_comments,
             why_good_for_movazzi=why,
             caution=caution,
         ))
@@ -531,11 +668,11 @@ async def find_videos(
 @app.get("/find-videos-simple")
 async def find_videos_simple(
     celebrity: str = Query(..., min_length=2, description="Full celebrity name, e.g. Ryan Reynolds."),
-    limit: int = Query(5, ge=1, le=20, description="Number of ranked results to return."),
+    limit: int = Query(40, ge=1, le=40, description="Number of ranked results to return."),
     avoid_shorts: bool = Query(True, description="Filter out YouTube Shorts and very short videos."),
-    max_candidates: int = Query(40, ge=25, le=80, description="How many candidate videos to scan before ranking."),
-    include_comments: bool = Query(False, description="Whether to scan comments for timestamp clues."),
-    region_code: str = Query(DEFAULT_REGION_CODE, min_length=2, max_length=2, description="YouTube region code, e.g. US, GB."),
+    max_candidates: int = Query(160, ge=25, le=250, description="How many candidate videos to scan before ranking."),
+    include_comments: bool = Query(True, description="Whether to scan comments for timestamp clues and viewer clue comments."),
+    region_code: str = Query(DEFAULT_REGION_CODE, description="Optional YouTube region code, e.g. US, GB. Leave blank for no region restriction."),
     published_after: Optional[str] = Query(None, description="Optional RFC3339 date filter, e.g. 2020-01-01T00:00:00Z."),
     x_movazzi_key: Optional[str] = Header(None, alias="X-Movazzi-Key"),
 ) -> Dict[str, Any]:
@@ -554,10 +691,18 @@ async def find_videos_simple(
 
     for video in full_response.results:
         moments = []
-        for moment in video.key_moments[:5]:
+        for moment in video.key_moments[:MAX_TIMESTAMP_MOMENTS_PER_VIDEO]:
             moments.append({
                 "timestamp": moment.timestamp,
                 "mentions": moment.mentions,
+                "evidence": moment.sample_comments[0] if moment.sample_comments else "",
+
+            viewer_clues = []
+            for clue in video.viewer_clue_comments[:MAX_VIEWER_CLUES_PER_VIDEO]:
+                viewer_clues.append({
+                    "score": clue.score,
+                    "comment": clue.text,
+                    "signals": clue.signals,
             })
 
         simple_results.append({
@@ -570,6 +715,7 @@ async def find_videos_simple(
             "likely_original_source": video.likely_original_source,
             "likely_compilation_or_reupload": video.likely_compilation_or_reupload,
             "key_moments": moments,
+            "viewer_clue_comments": viewer_clues,
             "why_good": video.why_good_for_movazzi[:3],
             "caution": video.caution[:3],
         })
