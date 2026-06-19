@@ -214,12 +214,8 @@ def extract_timestamps_from_comment(text: str) -> List[int]:
         total = h * 3600 + m * 60 + s
         seconds.append(total)
     return seconds
-
-
-def funny_signal_count(text: str) -> int:
-    t = normalize_text(text)
-    return sum(1 for w in FUNNY_WORDS if w in t)
-    VIEWER_MOMENT_CLUE_PHRASES = {
+    
+VIEWER_MOMENT_CLUE_PHRASES = {
     "the way he", "the way she", "the way they",
     "his face", "her face", "their face",
     "his reaction", "her reaction", "their reaction",
@@ -237,6 +233,11 @@ def funny_signal_count(text: str) -> int:
     "this killed me", "had me dying", "had everyone laughing",
     "that killed me", "the way",
 }
+    
+def funny_signal_count(text: str) -> int:
+    t = normalize_text(text)
+    return sum(1 for w in FUNNY_WORDS if w in t)
+
 
 
 def comment_has_timestamp(text: str) -> bool:
