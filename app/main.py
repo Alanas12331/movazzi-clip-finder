@@ -687,7 +687,7 @@ async def find_videos_simple(
         x_movazzi_key=x_movazzi_key,
     )
 
-        simple_results = []
+    simple_results = []
 
     for video in full_response.results:
         moments = []
@@ -720,12 +720,15 @@ async def find_videos_simple(
             "why_good": video.why_good_for_movazzi[:3],
             "caution": video.caution[:3],
         })
+
     return {
         "celebrity": full_response.celebrity,
         "results_returned": full_response.results_returned,
         "results": simple_results,
         "notes": [
             "Research candidates only.",
+            "Timestamp moments come only from YouTube comments, not video descriptions.",
+            "Viewer clue comments are non-timestamp comments that may describe funny or memorable moments.",
             "Verify original source, context, and reuse rights before using clips.",
             "Shorts are filtered by duration and Shorts signals, but verify manually."
         ],
