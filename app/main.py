@@ -687,22 +687,23 @@ async def find_videos_simple(
         x_movazzi_key=x_movazzi_key,
     )
 
-    simple_results = []
+        simple_results = []
 
     for video in full_response.results:
         moments = []
         for moment in video.key_moments[:MAX_TIMESTAMP_MOMENTS_PER_VIDEO]:
             moments.append({
                 "timestamp": moment.timestamp,
-                "mentions": moment.mentions,
+                "score": moment.mentions,
                 "evidence": moment.sample_comments[0] if moment.sample_comments else "",
+            })
 
-            viewer_clues = []
-            for clue in video.viewer_clue_comments[:MAX_VIEWER_CLUES_PER_VIDEO]:
-                viewer_clues.append({
-                    "score": clue.score,
-                    "comment": clue.text,
-                    "signals": clue.signals,
+        viewer_clues = []
+        for clue in video.viewer_clue_comments[:MAX_VIEWER_CLUES_PER_VIDEO]:
+            viewer_clues.append({
+                "score": clue.score,
+                "comment": clue.text,
+                "signals": clue.signals,
             })
 
         simple_results.append({
@@ -719,7 +720,6 @@ async def find_videos_simple(
             "why_good": video.why_good_for_movazzi[:3],
             "caution": video.caution[:3],
         })
-
     return {
         "celebrity": full_response.celebrity,
         "results_returned": full_response.results_returned,
