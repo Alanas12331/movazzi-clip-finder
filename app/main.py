@@ -2,7 +2,6 @@ import math
 import os
 import re
 from collections import Counter, defaultdict
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -50,6 +49,24 @@ ORIGINAL_SOURCE_CHANNEL_HINTS = {
     "buzzfeed celeb", "first we feast", "hot ones", "ladbible", "bbc radio 1",
     "capital fm", "mtv", "abc", "nbc", "cbs", "itv", "james corden",
 }
+VIEWER_MOMENT_CLUE_PHRASES = {
+    "the way he", "the way she", "the way they",
+    "his face", "her face", "their face",
+    "his reaction", "her reaction", "their reaction",
+    "the look on", "when he", "when she", "when they",
+    "that part", "this part", "the part where",
+    "the moment", "that moment", "at the end",
+    "the ending", "the delivery", "his delivery", "her delivery",
+    "he said", "she said", "they said",
+    "he says", "she says", "they say",
+    "he asked", "she asked", "the answer",
+    "the comeback", "that comeback", "the roast",
+    "the joke", "that joke", "the laugh",
+    "can't stop laughing", "made me laugh", "had me laughing",
+    "i lost it", "i died", "i'm dead", "i cried laughing",
+    "this killed me", "had me dying", "had everyone laughing",
+    "that killed me", "the way",
+}
 
 
 class Moment(BaseModel):
@@ -57,6 +74,7 @@ class Moment(BaseModel):
     seconds: int
     mentions: int
     sample_comments: List[str] = Field(default_factory=list)
+
 
 class ViewerCommentClue(BaseModel):
     score: int
@@ -99,18 +117,21 @@ class FindVideosResponse(BaseModel):
 async def yt_get(path: str, params: Dict[str, Any]) -> Dict[str, Any]:
     if not YOUTUBE_API_KEY:
         raise HTTPException(status_code=500, detail="Missing YOUTUBE_API_KEY on server.")
+
     params = dict(params)
     params["key"] = YOUTUBE_API_KEY
+
     async with httpx.AsyncClient(timeout=25) as client:
         resp = await client.get(f"{YOUTUBE_BASE}/{path}", params=params)
+
     if resp.status_code != 200:
         detail = resp.text[:1000]
         raise HTTPException(status_code=resp.status_code, detail=f"YouTube API error: {detail}")
+
     return resp.json()
 
 
 def require_action_key(x_movazzi_key: Optional[str]) -> None:
-    # If MOVAZZI_ACTION_KEY is set, require it.
     if MOVAZZI_ACTION_KEY and x_movazzi_key != MOVAZZI_ACTION_KEY:
         raise HTTPException(status_code=401, detail="Invalid or missing X-Movazzi-Key.")
 
@@ -134,25 +155,26 @@ def format_seconds(seconds: int) -> str:
 def build_queries(celebrity: str) -> List[str]:
     c = celebrity.strip()
     return [
-        f'{c} funny interview',
-        f'{c} funniest interview',
-        f'{c} hilarious interview',
-        f'{c} awkward interview',
-        f'{c} roast interview',
-        f'{c} Graham Norton funny',
-        f'{c} Jimmy Fallon funny interview',
-        f'{c} Jimmy Kimmel funny interview',
-        f'{c} Conan interview funny',
-        f'{c} WIRED autocomplete interview funny',
-        f'{c} Vanity Fair interview funny',
-        f'{c} GQ interview funny',
-        f'{c} red carpet funny interview',
-        f'{c} Hot Ones funny moments',
+        f"{c} funny interview",
+        f"{c} funniest interview",
+        f"{c} hilarious interview",
+        f"{c} awkward interview",
+        f"{c} roast interview",
+        f"{c} Graham Norton funny",
+        f"{c} Jimmy Fallon funny interview",
+        f"{c} Jimmy Kimmel funny interview",
+        f"{c} Conan interview funny",
+        f"{c} WIRED autocomplete interview funny",
+        f"{c} Vanity Fair interview funny",
+        f"{c} GQ interview funny",
+        f"{c} red carpet funny interview",
+        f"{c} Hot Ones funny moments",
     ]
 
 
 def normalize_text(s: str) -> str:
     return (s or "").lower().strip()
+
 
 def video_mentions_celebrity(video: Dict[str, Any], celebrity: str) -> bool:
     snippet = video.get("snippet", {})
@@ -214,30 +236,11 @@ def extract_timestamps_from_comment(text: str) -> List[int]:
         total = h * 3600 + m * 60 + s
         seconds.append(total)
     return seconds
-    
-VIEWER_MOMENT_CLUE_PHRASES = {
-    "the way he", "the way she", "the way they",
-    "his face", "her face", "their face",
-    "his reaction", "her reaction", "their reaction",
-    "the look on", "when he", "when she", "when they",
-    "that part", "this part", "the part where",
-    "the moment", "that moment", "at the end",
-    "the ending", "the delivery", "his delivery", "her delivery",
-    "he said", "she said", "they said",
-    "he says", "she says", "they say",
-    "he asked", "she asked", "the answer",
-    "the comeback", "that comeback", "the roast",
-    "the joke", "that joke", "the laugh",
-    "can't stop laughing", "made me laugh", "had me laughing",
-    "i lost it", "i died", "i'm dead", "i cried laughing",
-    "this killed me", "had me dying", "had everyone laughing",
-    "that killed me", "the way",
-}
-    
+
+
 def funny_signal_count(text: str) -> int:
     t = normalize_text(text)
     return sum(1 for w in FUNNY_WORDS if w in t)
-
 
 
 def comment_has_timestamp(text: str) -> bool:
@@ -463,7 +466,6 @@ def score_video(video: Dict[str, Any], key_moments: List[Moment], celebrity: str
     compilation = detect_compilation(video)
 
     title_l = normalize_text(title)
-    channel_l = normalize_text(channel)
     c_l = normalize_text(celebrity)
 
     score = 0.0
@@ -508,8 +510,6 @@ def score_video(video: Dict[str, Any], key_moments: List[Moment], celebrity: str
         caution.append("Title/channel suggests this may be a compilation or reupload; verify original source before using.")
     if not original:
         caution.append("Not clearly an official/original source; verify before using.")
-    if not key_moments:
-        caution.append("No strong timestamp moments found in sampled comments.")
 
     return round(score, 2), why, caution
 
@@ -560,7 +560,8 @@ async def find_videos(
     limit: int = Query(50, ge=1, le=50, description="Number of ranked results to return."),
     avoid_shorts: bool = Query(True, description="Filter out YouTube Shorts and very short videos."),
     max_candidates: int = Query(160, ge=25, le=300, description="How many candidate videos to scan before ranking."),
-    include_comments: bool = Query(True, description="Whether to scan comments for timestamp clues."),
+    include_comments: bool = Query(True, description="Whether to scan comments for timestamp clues and viewer clue comments."),
+    comment_scan_top_n: int = Query(10, ge=0, le=40, description="Only scan comments for the top N ranked videos to save YouTube API quota."),
     region_code: str = Query(DEFAULT_REGION_CODE, description="Optional YouTube region code, e.g. US, GB. Leave blank for no region restriction."),
     published_after: Optional[str] = Query(None, description="Optional RFC3339 date filter, e.g. 2020-01-01T00:00:00Z."),
     x_movazzi_key: Optional[str] = Header(None, alias="X-Movazzi-Key"),
@@ -593,25 +594,14 @@ async def find_videos(
         # Skip videos that are not embeddable/public where possible.
         if status.get("privacyStatus") not in (None, "public"):
             continue
-            
+
         duration_seconds = parse_duration_seconds(content.get("duration", ""))
 
-        comments_text = []
-
-        # Only scan YouTube comments for timestamp moments and viewer clue comments.
-        if include_comments and int(stats.get("commentCount", 0) or 0) > 0:
-            comments_text = await fetch_comments(video.get("id"), COMMENT_SAMPLE_PER_VIDEO)
-
-        moments: List[Moment] = summarize_moments(
-            comments_text,
-            duration_seconds,
-            max_moments=MAX_TIMESTAMP_MOMENTS_PER_VIDEO,
-        )
-
-        viewer_clue_comments: List[ViewerCommentClue] = extract_viewer_clue_comments(
-            comments_text,
-            max_items=MAX_VIEWER_CLUES_PER_VIDEO,
-        )
+        # Do not scan comments or descriptions here.
+        # First rank videos cheaply by metadata.
+        # Comments are scanned later only for the top selected results.
+        moments: List[Moment] = []
+        viewer_clue_comments: List[ViewerCommentClue] = []
 
         score, why, caution = score_video(video, moments, celebrity)
 
@@ -646,6 +636,47 @@ async def find_videos(
     candidates.sort(key=lambda x: x.score, reverse=True)
     candidates = candidates[:limit]
 
+    # Scan comments only after ranking, and only for the top N selected videos.
+    # This saves YouTube API quota compared with scanning comments for every candidate.
+    if include_comments and comment_scan_top_n > 0:
+        for candidate in candidates[:comment_scan_top_n]:
+            comments_text = []
+
+            if candidate.comment_count > 0:
+                comments_text = await fetch_comments(candidate.video_id, COMMENT_SAMPLE_PER_VIDEO)
+
+            moments: List[Moment] = summarize_moments(
+                comments_text,
+                candidate.duration_seconds,
+                max_moments=MAX_TIMESTAMP_MOMENTS_PER_VIDEO,
+            )
+
+            viewer_clue_comments: List[ViewerCommentClue] = extract_viewer_clue_comments(
+                comments_text,
+                max_items=MAX_VIEWER_CLUES_PER_VIDEO,
+            )
+
+            candidate.key_moments = moments
+            candidate.viewer_clue_comments = viewer_clue_comments
+
+            if moments:
+                candidate.why_good_for_movazzi.append(
+                    f"Found {len(moments)} comment timestamp moment(s)."
+                )
+            else:
+                candidate.caution.append("No strong timestamp moments found in scanned comments.")
+
+            if viewer_clue_comments:
+                candidate.why_good_for_movazzi.append(
+                    f"Found {len(viewer_clue_comments)} viewer clue comment(s)."
+                )
+
+    if include_comments and comment_scan_top_n < len(candidates):
+        for candidate in candidates[comment_scan_top_n:]:
+            candidate.caution.append(
+                "Comments were not scanned for this result to save YouTube API quota."
+            )
+
     for i, candidate in enumerate(candidates, start=1):
         candidate.rank = i
 
@@ -654,6 +685,7 @@ async def find_videos(
         "Always manually verify original source, context, and licensing before using clips.",
         "Key moments are inferred mainly from viewer timestamp comments, not full video understanding.",
         "Shorts are filtered by duration and title/description signals, but verify manually.",
+        "Comments are scanned only for the top selected results to save YouTube API quota.",
     ]
 
     return FindVideosResponse(
@@ -665,14 +697,16 @@ async def find_videos(
         results=candidates,
         notes=notes,
     )
-    
+
+
 @app.get("/find-videos-simple")
 async def find_videos_simple(
     celebrity: str = Query(..., min_length=2, description="Full celebrity name, e.g. Ryan Reynolds."),
-    limit: int = Query(40, ge=1, le=40, description="Number of ranked results to return."),
+    limit: int = Query(10, ge=1, le=40, description="Number of ranked results to return."),
     avoid_shorts: bool = Query(True, description="Filter out YouTube Shorts and very short videos."),
-    max_candidates: int = Query(160, ge=25, le=250, description="How many candidate videos to scan before ranking."),
+    max_candidates: int = Query(40, ge=25, le=250, description="How many candidate videos to scan before ranking."),
     include_comments: bool = Query(True, description="Whether to scan comments for timestamp clues and viewer clue comments."),
+    comment_scan_top_n: int = Query(10, ge=0, le=40, description="Only scan comments for the top N ranked videos to save YouTube API quota."),
     region_code: str = Query(DEFAULT_REGION_CODE, description="Optional YouTube region code, e.g. US, GB. Leave blank for no region restriction."),
     published_after: Optional[str] = Query(None, description="Optional RFC3339 date filter, e.g. 2020-01-01T00:00:00Z."),
     x_movazzi_key: Optional[str] = Header(None, alias="X-Movazzi-Key"),
@@ -683,6 +717,7 @@ async def find_videos_simple(
         avoid_shorts=avoid_shorts,
         max_candidates=max_candidates,
         include_comments=include_comments,
+        comment_scan_top_n=comment_scan_top_n,
         region_code=region_code,
         published_after=published_after,
         x_movazzi_key=x_movazzi_key,
@@ -730,6 +765,7 @@ async def find_videos_simple(
             "Research candidates only.",
             "Timestamp moments come only from YouTube comments, not video descriptions.",
             "Viewer clue comments are non-timestamp comments that may describe funny or memorable moments.",
+            "Comments are scanned only for the top selected results to save YouTube API quota.",
             "Verify original source, context, and reuse rights before using clips.",
             "Shorts are filtered by duration and Shorts signals, but verify manually."
         ],
