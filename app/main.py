@@ -234,8 +234,8 @@ def funny_signal_count(text: str) -> int:
     "the joke", "that joke", "the laugh",
     "can't stop laughing", "made me laugh", "had me laughing",
     "i lost it", "i died", "i'm dead", "i cried laughing",
-    "this killed me", "had me dying", "had everyone laughing",    
-    " ", "that killed me", "the way",
+    "this killed me", "had me dying", "had everyone laughing",
+    "that killed me", "the way",
 }
 
 
