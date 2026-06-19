@@ -16,8 +16,10 @@ load_dotenv()
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "")
 MOVAZZI_ACTION_KEY = os.getenv("MOVAZZI_ACTION_KEY", "")
 MIN_DURATION_SECONDS = int(os.getenv("MIN_DURATION_SECONDS", "120"))
-COMMENT_SAMPLE_PER_VIDEO = int(os.getenv("COMMENT_SAMPLE_PER_VIDEO", "40"))
-DEFAULT_REGION_CODE = os.getenv("DEFAULT_REGION_CODE", "US")
+COMMENT_SAMPLE_PER_VIDEO = int(os.getenv("COMMENT_SAMPLE_PER_VIDEO", "200"))
+MAX_TIMESTAMP_MOMENTS_PER_VIDEO = int(os.getenv("MAX_TIMESTAMP_MOMENTS_PER_VIDEO", "30"))
+MAX_VIEWER_CLUES_PER_VIDEO = int(os.getenv("MAX_VIEWER_CLUES_PER_VIDEO", "30"))
+DEFAULT_REGION_CODE = os.getenv("DEFAULT_REGION_CODE", "")
 
 YOUTUBE_BASE = "https://www.googleapis.com/youtube/v3"
 
@@ -56,6 +58,11 @@ class Moment(BaseModel):
     mentions: int
     sample_comments: List[str] = Field(default_factory=list)
 
+class ViewerCommentClue(BaseModel):
+    score: int
+    text: str
+    signals: List[str] = Field(default_factory=list)
+
 
 class VideoCandidate(BaseModel):
     rank: int
@@ -74,6 +81,7 @@ class VideoCandidate(BaseModel):
     likely_compilation_or_reupload: bool = False
     shorts_filtered_reason: Optional[str] = None
     key_moments: List[Moment] = Field(default_factory=list)
+    viewer_clue_comments: List[ViewerCommentClue] = Field(default_factory=list)
     why_good_for_movazzi: List[str] = Field(default_factory=list)
     caution: List[str] = Field(default_factory=list)
 
